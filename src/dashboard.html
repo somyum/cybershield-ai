@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CyberShield AI</title>
+<style>
+  :root { --bg:#0b1020; --card:#131a2e; --text:#e6e9f2; --muted:#8b93a7;
+          --critical:#ff4d6d; --high:#ff9f43; --medium:#feca57; --ok:#2ed573; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); padding:24px; }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  h1 { margin:0; font-size:22px; }
+  h2 { margin:0 0 12px; font-size:14px; color:var(--muted); font-weight:500; }
+  .right { display:flex; gap:12px; align-items:center; font-size:13px; color:var(--muted); }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--ok); }
+  .dot.off { background:var(--critical); }
+  button { background:#3b82f6; color:#fff; border:0; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; }
+  .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .value { font-size:28px; font-weight:600; margin-top:4px; }
+  .main { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid #222b45; }
+  th { color:var(--muted); font-weight:500; }
+  .sev { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; color:#0b1020; }
+  .critical { background:var(--critical); } .high { background:var(--high); } .medium { background:var(--medium); }
+  .bar-row { margin-bottom:12px; font-size:13px; }
+  .bar { height:8px; background:#222b45; border-radius:4px; margin-top:4px; }
+  .bar > div { height:100%; border-radius:4px; background:#3b82f6; transition:width .4s; }
+  .note { color:var(--muted); font-size:12px; margin-top:16px; }
+  @media (max-width:800px) { .grid { grid-template-columns:repeat(2,1fr); } .main { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>CyberShield AI <span style="color:var(--muted);font-weight:400">· live threat monitor</span></h1>
+  <div class="right">
+    <span class="dot" id="dot"></span><span id="status">connecting...</span>
+      <button id="burst" style="background:#ff4d6d">Simulate attack</button>
+    <button id="toggle">Pause</button>
+  </div>
+</header>
+
+<div class="grid">
+  <div class="card"><div class="label">Connections scanned</div><div class="value" id="scanned">0</div></div>
+  <div class="card"><div class="label">Alerts raised</div><div class="value" id="alerts">0</div></div>
+  <div class="card"><div class="label">Attacks caught</div><div class="value" id="caught">–</div></div>
+  <div class="card"><div class="label">Attacks missed</div><div class="value" id="missed">0</div></div>
+</div>
+
+<div class="main">
+  <div class="card">
+    <h2>Live alert feed</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Severity</th><th>Category</th><th>Service</th><th>Proto</th><th>Prob.</th><th>Actual</th></tr></thead>
+      <tbody id="feed"></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Alerts by category</h2>
+    <div id="cats"></div>
+  </div>
+</div>
+<p class="note">Demo mode replays real NSL-KDD test traffic. "Actual" is the true label, shown so detection quality is visible, including attacks the model misses.</p>
+
+<script>
+let running = true, scanned = 0, alerts = 0, attacksSeen = 0, caught = 0, missed = 0;
+const byCat = {}, feed = [];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function render() {
+  $("scanned").textContent = scanned.toLocaleString();
+  $("alerts").textContent = alerts.toLocaleString();
+  $("missed").textContent = missed.toLocaleString();
+  $("caught").textContent = attacksSeen ? Math.round(100 * caught / attacksSeen) + "%" : "–";
+  $("feed").innerHTML = feed.map(r => `<tr>
+    <td>${esc(new Date(r.time).toLocaleTimeString())}</td>
+    <td><span class="sev ${esc(r.severity)}">${esc(r.severity)}</span></td>
+      <td>${esc(r.category)}<div style="color:var(--muted);font-size:11px;max-width:340px">${esc(r.explanation||"")}</div></td><td>${esc(r.service)}</td><td>${esc(r.protocol)}</td>
+    <td>${(r.attack_probability * 100).toFixed(0)}%</td><td>${esc(r.actual)}</td></tr>`).join("");
+  const max = Math.max(1, ...Object.values(byCat));
+  $("cats").innerHTML = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
+    `<div class="bar-row">${esc(k)} <span style="float:right">${v}</span>
+     <div class="bar"><div style="width:${100 * v / max}%"></div></div></div>`).join("");
+}
+
+  async function tick(url = "/simulate?n=5") {
+    if (!running && url === "/simulate?n=5") return;
+    try {
+      const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    for (const r of await res.json()) {
+      scanned++;
+      const isReal = r.actual !== "normal";
+      if (isReal) attacksSeen++;
+      if (r.is_attack) {
+        alerts++; byCat[r.category] = (byCat[r.category] || 0) + 1;
+        feed.unshift(r); if (isReal) caught++;
+      } else if (isReal) missed++;
+    }
+    if (feed.length > 15) feed.length = 15;
+    render();
+    $("dot").classList.remove("off"); $("status").textContent = "live";
+  } catch (e) {
+    $("dot").classList.add("off"); $("status").textContent = "API offline";
+  }
+}
+
+$("toggle").onclick = () => {
+  running = !running;
+  $("toggle").textContent = running ? "Pause" : "Resume";
+  $("status").textContent = running ? "live" : "paused";
+};
+$("burst").onclick = () => tick("/simulate-attack?n=10");
+setInterval(tick, 2000); tick();
+</script>
+</body>
+</html>
