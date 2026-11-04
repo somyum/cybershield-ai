@@ -43,7 +43,9 @@ python -m venv venv
 source venv/Scripts/activate        # Windows Git Bash
 pip install -r requirements.txt
 
-# Download NSL-KDD (KDDTrain+.txt, KDDTest+.txt) into data/
+mkdir -p data models
+curl -L "https://raw.githubusercontent.com/defcom17/NSL_KDD/master/KDDTrain%2B.txt" -o "data/KDDTrain+.txt"
+curl -L "https://raw.githubusercontent.com/defcom17/NSL_KDD/master/KDDTest%2B.txt" -o "data/KDDTest+.txt"
 python src/train.py                 # baseline
 python src/train_xgb.py             # trains and saves both XGBoost models
 uvicorn api:app --app-dir src --reload
